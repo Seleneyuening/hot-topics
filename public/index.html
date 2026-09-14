@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>今日热点 · 全网热榜聚合</title>
+<meta name="description" content="自托管的全网热点聚合网关:微博/知乎/百度/抖音/头条/小红书/B站等实时热榜,直连各平台官方接口。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%94%A5%3C/text%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #0d1017;
+  --bg-soft: #131722;
+  --card: #171c29;
+  --card-hover: #1c2231;
+  --border: #242b3d;
+  --text: #e6e9f0;
+  --text-dim: #8b93a7;
+  --text-faint: #5b6377;
+  --accent: #ff5d47;
+  --accent-soft: rgba(255, 93, 71, .12);
+  --ok: #3fc878;
+  --warn: #e8b93c;
+  --radius: 14px;
+}
+[data-theme="light"] {
+  --bg: #f4f5f8;
+  --bg-soft: #eceef3;
+  --card: #ffffff;
+  --card-hover: #f7f8fa;
+  --border: #e3e6ee;
+  --text: #1c2130;
+  --text-dim: #5d6577;
+  --text-faint: #9aa2b5;
+  --accent: #f04438;
+  --accent-soft: rgba(240, 68, 56, .08);
+  --ok: #17a45c;
+  --warn: #c98a04;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scrollbar-gutter: stable; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  transition: background .25s, color .25s;
+}
+a { color: inherit; text-decoration: none; }
+
+/* ---------- header ---------- */
+header {
+  position: sticky; top: 0; z-index: 10;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--border);
+}
+.header-inner {
+  max-width: 1560px; margin: 0 auto; padding: 14px 24px;
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+}
+.logo { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 800; letter-spacing: .5px; }
+.logo .flame { font-size: 24px; }
+.badge-ver {
+  font-size: 11px; font-weight: 600; color: var(--text-dim);
+  border: 1px solid var(--border); border-radius: 20px; padding: 2px 8px;
+}
+.header-spacer { flex: 1; }
+.search-wrap { position: relative; }
+.search-wrap .icon {
+  position: absolute; left: 11px; top: 50%; transform: translateY(-50%);
+  color: var(--text-faint); font-size: 14px; pointer-events: none;
+}
+#search {
+  width: 220px; padding: 8px 12px 8px 30px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+  color: var(--text); font-size: 13.5px; outline: none;
+  transition: border-color .2s, width .25s;
+}
+#search:focus { border-color: var(--accent); width: 260px; }
+#search::placeholder { color: var(--text-faint); }
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 13px; border-radius: 10px; cursor: pointer;
+  background: var(--card); border: 1px solid var(--border);
+  color: var(--text-dim); font-size: 13px; font-weight: 500; line-height: 1;
+  transition: all .18s; user-select: none; white-space: nowrap;
+}
+.btn:hover { color: var(--text); border-color: var(--text-faint); }
+.btn.primary { background: var(--accent-soft); border-color: transparent; color: var(--accent); font-weight: 700; }
+.btn.primary:hover { filter: brightness(1.1); }
+.btn.active { color: var(--accent); border-color: var(--accent); }
+.btn.refreshing .spin { animation: rot 1s linear infinite; }
+@keyframes rot { to { transform: rotate(360deg); } }
+.meta-line {
+  max-width: 1560px; margin: 0 auto; padding: 0 24px 10px;
+  font-size: 12px; color: var(--text-faint); display: flex; gap: 14px; flex-wrap: wrap; align-items: center;
+}
+.meta-line .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); display: inline-block; margin-right: 5px; vertical-align: 1px; }
+.meta-line .dot.err { background: var(--warn); }
+.cat-bar {
+  max-width: 1560px; margin: 0 auto; padding: 0 24px 12px;
+  display: flex; gap: 8px; flex-wrap: wrap;
+}
+.chip {
+  padding: 5px 14px; font-size: 13px; border-radius: 20px; cursor: pointer;
+  background: var(--bg-soft); border: 1px solid var(--border); color: var(--text-dim);
+  transition: all .15s; user-select: none;
+}
+.chip:hover { color: var(--text); }
+.chip.active { background: var(--accent-soft); border-color: transparent; color: var(--accent); font-weight: 600; }
+
+/* ---------- grid & cards ---------- */
+main { max-width: 1560px; margin: 0 auto; padding: 22px 24px 60px; }
+.grid {
+  display: grid; gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+}
+.card {
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+  overflow: hidden; display: flex; flex-direction: column;
+  transition: border-color .2s, background .2s;
+  break-inside: avoid;
+}
+.card:hover { border-color: color-mix(in srgb, var(--text-faint) 55%, var(--border)); }
+.card-head {
+  display: flex; align-items: center; gap: 9px;
+  padding: 13px 16px 11px; border-bottom: 1px solid var(--border);
+}
+.card-title { font-size: 15px; font-weight: 700; }
+.card-cat {
+  font-size: 10.5px; color: var(--text-dim); background: var(--bg-soft);
+  padding: 2px 8px; border-radius: 12px; border: 1px solid var(--border);
+}
+.card-time { margin-left: auto; font-size: 11px; color: var(--text-faint); display: flex; align-items: center; gap: 5px; }
+.stale-tag { color: var(--warn); font-weight: 600; }
+.card-list { flex: 1; overflow: hidden; }
+.row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8.5px 14px; border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  transition: background .15s;
+}
+.row:last-child { border-bottom: none; }
+.row:hover { background: var(--card-hover); }
+.row .rank {
+  min-width: 21px; height: 21px; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11.5px; font-weight: 700; color: var(--text-faint);
+  background: var(--bg-soft); flex-shrink: 0;
+}
+.row:nth-child(1) .rank { background: var(--accent); color: #fff; }
+.row:nth-child(2) .rank { background: color-mix(in srgb, var(--accent) 65%, var(--warn)); color: #fff; }
+.row:nth-child(3) .rank { background: color-mix(in srgb, var(--accent) 35%, var(--warn)); color: #fff; }
+.row .title {
+  flex: 1; font-size: 13.8px; line-height: 1.45;
+  overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.row:hover .title { color: var(--accent); }
+.row .hot { font-size: 11.5px; color: var(--text-faint); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.card-foot { padding: 8px 16px 10px; font-size: 11px; color: var(--text-faint); }
+.empty-card, .error-card { padding: 26px 16px; text-align: center; font-size: 13px; color: var(--text-dim); }
+.error-card .btn { margin-top: 12px; }
+
+/* ---------- skeleton ---------- */
+.sk-card { height: 420px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); }
+@keyframes pulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+.sk-card { animation: pulse 1.6s ease-in-out infinite; }
+
+/* ---------- toast & footer ---------- */
+#toast {
+  position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%) translateY(20px);
+  background: var(--card); color: var(--text); border: 1px solid var(--border);
+  padding: 10px 20px; border-radius: 12px; font-size: 13.5px;
+  box-shadow: 0 8px 30px rgba(0,0,0,.35);
+  opacity: 0; pointer-events: none; transition: all .25s; z-index: 99;
+}
+#toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+footer {
+  border-top: 1px solid var(--border); padding: 20px 24px 34px;
+  text-align: center; font-size: 12px; color: var(--text-faint); line-height: 1.9;
+}
+footer a { color: var(--text-dim); }
+footer a:hover { color: var(--accent); }
+
+@media (max-width: 640px) {
+  .header-inner { padding: 12px 16px; }
+  #search { width: 150px; } #search:focus { width: 170px; }
+  main { padding: 16px 16px 50px; }
+  .grid { grid-template-columns: 1fr; }
+  .meta-line, .cat-bar { padding-left: 16px; padding-right: 16px; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-inner">
+    <div class="logo"><span class="flame">🔥</span>今日热点<span class="badge-ver" id="ver">API</span></div>
+    <div class="header-spacer"></div>
+    <div class="search-wrap">
+      <span class="icon">⌕</span>
+      <input id="search" type="text" placeholder="关键词筛选…">
+    </div>
+    <button class="btn" id="btn-copy" title="复制全部榜单为 Markdown">复制 Markdown</button>
+    <button class="btn" id="btn-auto" title="每 5 分钟自动刷新">自动</button>
+    <button class="btn primary" id="btn-refresh"><span class="spin">⟳</span> 刷新</button>
+    <button class="btn" id="btn-theme" title="切换主题">◐</button>
+  </div>
+  <div class="meta-line">
+    <span><span class="dot" id="status-dot"></span><span id="status-text">加载中…</span></span>
+    <span id="update-time"></span>
+    <span id="match-info"></span>
+  </div>
+  <div class="cat-bar" id="cat-bar"></div>
+</header>
+
+<main>
+  <div class="grid" id="grid">
+    <div class="empty-card" style="grid-column:1/-1;padding:70px 0">正在连接网关…</div>
+  </div>
+</main>
+
+<footer>
+  数据来源为各平台公开接口,通过本站自托管网关聚合缓存,仅供学习与选题参考;各条目版权归原作者与所属平台。<br>
+  hot-topics gateway · Cloudflare Workers / Pages 双部署 · <a href="/api" target="_blank">API 文档</a>
+</footer>
+
+<div id="toast"></div>
+
+<script>
+(() => {
+  'use strict'
+  const $ = (s) => document.querySelector(s)
+  const grid = $('#grid')
+  const state = {
+    data: [],          // PlatformResult[]
+    keyword: '',       // 筛选关键词
+    category: '全部',
+    auto: localStorage.getItem('ht-auto') !== '0',
+    timer: null,
+    markdownCache: '',
+  }
+
+  // ---------- theme ----------
+  const theme = localStorage.getItem('ht-theme') || 'dark'
+  document.documentElement.dataset.theme = theme
+  $('#btn-theme').onclick = () => {
+    const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'
+    document.documentElement.dataset.theme = next
+    localStorage.setItem('ht-theme', next)
+  }
+
+  // ---------- toast ----------
+  let toastTimer
+  function toast(msg) {
+    const el = $('#toast')
+    el.textContent = msg
+    el.classList.add('show')
+    clearTimeout(toastTimer)
+    toastTimer = setTimeout(() => el.classList.remove('show'), 2200)
+  }
+
+  // ---------- category chips ----------
+  function renderChips() {
+    const cats = ['全部', ...new Set(state.data.map((p) => p.category).filter(Boolean))]
+    $('#cat-bar').innerHTML = cats.map((c) =>
+      `<span class="chip${c === state.category ? ' active' : ''}" data-cat="${c}">${c}</span>`).join('')
+    document.querySelectorAll('.chip').forEach((el) => {
+      el.onclick = () => { state.category = el.dataset.cat; renderChips(); render() }
+    })
+  }
+
+  // ---------- helpers ----------
+  const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (m) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]))
+  const timeAgo = (iso) => {
+    const diff = (Date.now() - new Date(iso).getTime()) / 1000
+    if (diff < 90) return '刚刚'
+    if (diff < 3600) return `${Math.round(diff / 60)} 分钟前`
+    if (diff < 86400) return `${Math.round(diff / 3600)} 小时前`
+    return `${Math.round(diff / 86400)} 天前`
+  }
+
+  // ---------- render ----------
+  function render() {
+    const kw = state.keyword.trim().toLowerCase()
+    let totalMatch = 0
+    const cards = state.data.map((p) => {
+      if (state.category !== '全部' && p.category !== state.category) return ''
+      if (p.pending) {
+        return `<div class="card"><div class="card-head"><span class="card-title">${escapeHtml(p.name)}</span>
+          <span class="card-cat">${escapeHtml(p.category || '')}</span></div>
+          <div class="empty-card">加载中…</div></div>`
+      }
+      let rows = p.items
+      if (kw) {
+        rows = rows.filter((it) => it.title.toLowerCase().includes(kw))
+        totalMatch += rows.length
+      }
+      const head = `
+        <div class="card-head">
+          <span class="card-title">${escapeHtml(p.name)}</span>
+          <span class="card-cat">${escapeHtml(p.category || '')}</span>
+          <span class="card-time">${p.stale ? '<span class="stale-tag">缓存</span>·' : ''}${p.update_time ? timeAgo(p.update_time) : ''}</span>
+        </div>`
+      if (p.error) {
+        return `<div class="card"><div class="card-head"><span class="card-title">${escapeHtml(p.name)}</span>
+          <span class="card-cat">${escapeHtml(p.category || '')}</span></div>
+          <div class="error-card">抓取失败<br><span style="font-size:11.5px;color:var(--text-faint)">${escapeHtml(p.error)}</span><br>
+          <button class="btn primary" data-retry="${escapeHtml(p.platform)}">重试</button></div></div>`
+      }
+      const rowsHtml = rows.slice(0, 15).map((it, i) => `
+        <div class="row">
+          <span class="rank">${i + 1}</span>
+          <a class="title" href="${escapeHtml(it.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(it.title)}</a>
+          <span class="hot">${escapeHtml(String(it.hot ?? ''))}</span>
+        </div>`).join('')
+      const listHtml = rows.length
+        ? `<div class="card-list">${rowsHtml}</div>`
+        : `<div class="empty-card">${kw ? '无命中条目' : '暂无数据'}</div>`
+      return `<div class="card">${head}${listHtml}
+        <div class="card-foot">共 ${p.total ?? rows.length} 条 · 来源:各平台官方接口</div></div>`
+    }).join('')
+    grid.innerHTML = cards || '<div class="empty-card" style="grid-column:1/-1;padding:60px 0">该分类暂无数据</div>'
+    $('#match-info').textContent = kw ? `关键词命中 ${totalMatch} 条` : ''
+    document.querySelectorAll('[data-retry]').forEach((btn) => {
+      btn.onclick = () => refresh('single', btn.dataset.retry)
+    })
+  }
+
+  // ---------- data ----------
+  // 按分类分批加载:绕开免费版 Workers 单请求 50 子请求上限,分类间互不影响
+  let platMeta = null
+  let reloadedForSession = false
+
+  async function refresh(mode = 'all', retryId = null) {
+    const btn = $('#btn-refresh')
+    btn.classList.add('refreshing')
+    $('#status-text').textContent = '刷新中…'
+    try {
+      if (!platMeta) {
+        const meta = await (await fetch('/api/platforms')).json()
+        platMeta = meta.data || []
+      }
+      // 初始化占位(registry 顺序),已加载过的分类数据保留
+      if (mode === 'all') {
+        state.data = platMeta.map((p) => {
+          const old = state.data.find((x) => x.platform === p.id)
+          return old || { platform: p.id, name: p.name, category: p.category, update_time: '', total: 0, items: [], pending: true }
+        })
+        renderChips()
+        render()
+      }
+      const cats = mode === 'all'
+        ? [...new Set(platMeta.map((p) => p.category))]
+        : null
+      let okCount = 0, done = 0
+      const totalParts = mode === 'all' ? cats.length : 1
+      const applyPart = (body) => {
+        for (const p of body.data || []) {
+          const idx = state.data.findIndex((x) => x.platform === p.platform)
+          if (idx >= 0) state.data[idx] = p
+        }
+        done++
+        const loaded = state.data.filter((p) => !p.pending)
+        okCount = loaded.filter((p) => !p.error).length
+        $('#status-text').textContent = `加载中 ${done}/${totalParts}…`
+        render()
+      }
+      const parts = mode === 'all'
+        ? cats.map((cat) => fetch(`/api/category/${encodeURIComponent(cat)}`).then((r) => r.json()))
+        : [fetch(`/api/${retryId}?refresh=1`).then((r) => r.json())]
+      const settled = await Promise.allSettled(parts)
+      settled.forEach((r) => { if (r.status === 'fulfilled') applyPart(r.value) })
+      const failed = state.data.filter((p) => !p.pending && p.error).length
+      $('#status-dot').classList.toggle('err', failed > 0)
+      $('#status-text').textContent = failed
+        ? `${okCount} 个平台正常,${failed} 个平台暂不可用`
+        : `全部 ${okCount} 个平台正常`
+      $('#update-time').textContent = `更新于 ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`
+      render()
+    } catch (e) {
+      $('#status-text').textContent = `加载失败:${e.message}`
+      if (!state.data.length) grid.innerHTML = '<div class="empty-card" style="grid-column:1/-1;padding:80px 0">网关不可达,请检查部署状态</div>'
+    } finally {
+      btn.classList.remove('refreshing')
+    }
+  }
+
+  // ---------- controls ----------
+  $('#btn-refresh').onclick = () => refresh()
+  $('#search').addEventListener('input', (e) => { state.keyword = e.target.value; render() })
+  $('#btn-auto').classList.toggle('active', state.auto)
+  function setAuto(on) {
+    state.auto = on
+    localStorage.setItem('ht-auto', on ? '1' : '0')
+    $('#btn-auto').classList.toggle('active', on)
+    clearInterval(state.timer)
+    if (on) state.timer = setInterval(() => refresh(), 5 * 60 * 1000)
+  }
+  $('#btn-auto').onclick = () => setAuto(!state.auto)
+  if (state.auto) state.timer = setInterval(() => refresh(), 5 * 60 * 1000)
+
+  $('#btn-copy').onclick = async () => {
+    if (!state.data.length) return
+    const kw = state.keyword.trim().toLowerCase()
+    const lines = [`# 今日热点(${new Date().toLocaleString('zh-CN', { hour12: false })})`]
+    for (const p of state.data) {
+      if (p.error || !p.items?.length) continue
+      if (state.category !== '全部' && p.category !== state.category) continue
+      const items = kw ? p.items.filter((it) => it.title.toLowerCase().includes(kw)) : p.items
+      if (!items.length) continue
+      lines.push('', `## ${p.name}`)
+      items.slice(0, 15).forEach((it, i) => {
+        const hot = it.hot ? ` \`${it.hot}\`` : ''
+        lines.push(`${i + 1}. [${it.title}](${it.url})${hot}`)
+      })
+    }
+    try {
+      await navigator.clipboard.writeText(lines.join('\n'))
+      toast('已复制为 Markdown')
+    } catch {
+      toast('复制失败,请检查浏览器权限')
+    }
+  }
+
+  refresh()
+})()
+</script>
+</body>
+</html>
