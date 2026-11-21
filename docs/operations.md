@@ -25,6 +25,18 @@
 上游微信公众号榜单来自 TopHub，X 趋势来自 Trends24，均作为第三方来源展示且暂停。上游 B 站热搜和热门视频有 TopHub 回退，当前发布链路已移除；原财联社实现依赖客户端签名，并以新浪财经快讯回退，榜单来源和内容语义不同，因此保留为暂停项。其余启用的抓取器请求各自来源，无需付费聚合 API。
 [小红书开放平台](https://school.xiaohongshu.com/en/open/index.html) · [微博使用协议](https://www.weibo.com/signup/v5/protocol/) · [知乎 robots.txt](https://www.zhihu.com/robots.txt) · [B站 API robots.txt](https://api.bilibili.com/robots.txt)
 
+### 首发验收记录
+
+北京时间 2026-11-22 00:41–00:45，Cloudflare Cron 日志和公网 API 确认：
+
+- 小红书返回 HTTP 406；B 站热搜返回 HTTP 412。两项都在生产标记为不可用，并暂停后续请求。本地 B 站热搜可解析 50 条，说明本地结果无法代表云端可用性。
+- 抖音成功返回 49 条，百度 50 条，GitHub Trending 16 条。Cron 日志记录了源域名及条数。连续六次读取抖音 API（部分含旧的强制刷新参数）共用同一快照，最近尝试和最后成功时间均未改变。
+- 微博和知乎只进行了本地匿名诊断。生产中的状态是因访问政策暂停，页面保留对应入口。
+- 其余 23 个启用抓取器在本地测试中有 19 个返回了条目。快手和线报酷返回内容但未解析出榜单；美国之音和德国之声未通过网络或内容校验。低频源的生产可用性以各自 Cron 结果为准。
+- 公网页面通过桌面、iPhone 和 iPad 视口模拟，检查了 34 张卡片、分类及平台筛选、主题切换和横向溢出。未使用实体移动设备。
+- GitHub 的独立验证及每日上游检查工作流均运行成功。上游当时无新增提交，未触发真实同步 PR。主分支推送触发了发布工作流，其凭据检查因缺少 `CLOUDFLARE_API_TOKEN` 而停止；首发版本经本机 Wrangler OAuth 上传。
+[生产状态](https://nowtide.liwangjing200.workers.dev/api/all?limit=1) · [GitHub Actions](https://github.com/Seleneyuening/hot-topics/actions)
+
 ## 网页、缓存与抓取
 
 | 项目 | 配置 |
