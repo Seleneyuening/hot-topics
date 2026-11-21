@@ -31,7 +31,6 @@ async function viaMobile(): Promise<HotItem[]> {
     headers: {
       'User-Agent': UA_CHROME,
       Referer: 'https://m.weibo.cn/',
-      Cookie: 'WEIBOCN_FROM=1110006030; MLOGIN=0',
     },
   })
   const group: any[] = json?.data?.cards?.[0]?.card_group || []

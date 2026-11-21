@@ -1,140 +1,129 @@
-import type { Env, PlatformResult } from './types'
-import { PLATFORM_MAP } from './registry'
-import { md5 } from 'js-md5'
+import type { Env, HotItem, PlatformResult } from './types'
+import { CRONS, FEEDS, isDue } from './schedule'
 
-interface CacheEntry {
-  fetchedAt: number
-  /** 最近一次写入 KV 的时间(0 = 旧格式数据,重写后补齐) */
-  savedAt: number
-  /** 条目内容指纹,用于「变更才写」降低 KV 写入量 */
-  hash: string
-  data: PlatformResult
+interface Entry {
+  items: HotItem[]
+  successAt: number | null
+  attemptedAt: number
+  error?: string
+  failures: number
+  retryAt?: number
+  disabled?: boolean
 }
 
-/** 一级缓存:同 Isolate 内存 */
-const memory = new Map<string, CacheEntry>()
-/** 防止同 Isolate 并发重复抓取(惊群) */
-const inflight = new Map<string, Promise<PlatformResult>>()
-
-const KV_PREFIX = 'hot:'
-const KV_RETENTION_SEC = 86400
-/** KV 宽限期:数据超过内存 TTL 但未超此值时直接返回(冷启动首请求免全量重抓) */
-const KV_GRACE_MS = 30 * 60_000
-/** 同平台 KV 写入最小间隔:控制写量在免费额度内(34 榜 × 24 次/天 ≈ 816 写) */
-const KV_MIN_WRITE_INTERVAL_MS = 3600_000
-/** cron 分批数:每 5 分钟刷一批,3 批轮转一圈,控制单次 scheduled 的子请求数 */
-export const REFRESH_BATCHES = 3
-
-function ttlSeconds(env?: Env): number {
-  const n = Number(env?.CACHE_TTL)
-  return Number.isFinite(n) && n > 0 ? n : 300
+interface Snapshot {
+  tick: number
+  entries: Record<string, Entry>
 }
 
-async function runFetch(id: string): Promise<PlatformResult> {
-  const def = PLATFORM_MAP.get(id)
-  if (!def) throw new Error(`Unknown platform: ${id}`)
-  const items = await def.fetcher()
+type Feed = (typeof FEEDS)[number]
+const key = (shard: number) => `nowtide:v1:${shard}`
+
+async function snapshot(kv: KVNamespace, shard: number) {
+  return await kv.get<Snapshot>(key(shard), { type: 'json', cacheTtl: 30 })
+}
+
+const reads = new Map<number, { until: number; value: Snapshot | null }>()
+
+async function readPublished(kv: KVNamespace, shard: number) {
+  const cached = reads.get(shard)
+  if (cached && cached.until > Date.now()) return cached.value
+  const value = await snapshot(kv, shard)
+  reads.set(shard, { until: Date.now() + 30_000, value })
+  return value
+}
+
+function present(feed: Feed, entry?: Entry, storageError?: string): PlatformResult {
+  const successAt = entry?.successAt
+  const error = feed.paused ?? entry?.error ?? storageError
+  const expiresAt = successAt == null ? null : successAt + feed.minutes * 60_000
+  const stale = expiresAt !== null && (Boolean(error) || expiresAt <= Date.now())
+  const status = stale ? 'stale' : error ? 'error' : successAt == null ? 'pending' : 'fresh'
   return {
-    platform: def.id,
-    name: def.name,
-    category: def.category,
-    update_time: new Date().toISOString(),
-    total: items.length,
-    items,
+    platform: feed.id,
+    name: feed.name,
+    category: feed.category,
+    source: feed.source,
+    source_link: feed.link,
+    interval_minutes: feed.paused || entry?.disabled ? null : feed.minutes,
+    update_time: successAt == null ? '' : new Date(successAt).toISOString(),
+    attempted_at: entry ? new Date(entry.attemptedAt).toISOString() : null,
+    expires_at: expiresAt == null ? null : new Date(expiresAt).toISOString(),
+    retry_at: entry?.retryAt ? new Date(entry.retryAt).toISOString() : null,
+    total: entry?.items.length ?? 0,
+    items: entry?.items ?? [],
+    status,
+    stale,
+    error,
   }
 }
 
-function entryHash(data: PlatformResult): string {
-  return md5(JSON.stringify(data.items))
-}
-
-function normalizeEntry(raw: any): CacheEntry | null {
-  if (!raw?.data || typeof raw.fetchedAt !== 'number') return null
-  return { fetchedAt: raw.fetchedAt, savedAt: raw.savedAt ?? 0, hash: raw.hash ?? '', data: raw.data }
-}
-
-/** 内存 + KV 双写;KV 侧「变更才写 + 最小间隔限流」以适配免费写额度。
- *  kvEntry:调用方已读取的旧条目(省一次 KV 读,子请求限额宝贵);未传时内部补读。 */
-async function persist(env: Env | undefined, id: string, data: PlatformResult, kvEntry?: CacheEntry | null): Promise<void> {
-  const hash = entryHash(data)
-  memory.set(id, { fetchedAt: Date.now(), savedAt: kvEntry?.savedAt ?? 0, hash, data })
-  if (!env?.KV) return
-  try {
-    const old = kvEntry === undefined ? await readKv(env, id) : kvEntry
-    if (old && old.hash === hash) return // 内容没变,跳过
-    if (old?.savedAt && Date.now() - old.savedAt < KV_MIN_WRITE_INTERVAL_MS) return // 写入限流
-    const toSave: CacheEntry = { fetchedAt: Date.now(), savedAt: Date.now(), hash, data }
-    await env.KV.put(`${KV_PREFIX}${id}`, JSON.stringify(toSave), { expirationTtl: KV_RETENTION_SEC })
-  } catch {
-    // KV 写失败不影响返回
-  }
-}
-
-async function readKv(env: Env | undefined, id: string): Promise<CacheEntry | null> {
-  if (!env?.KV) return null
-  try {
-    const raw = await env.KV.get(`${KV_PREFIX}${id}`)
-    if (!raw) return null
-    return normalizeEntry(JSON.parse(raw))
-  } catch {
-    return null
-  }
-}
-
-export async function getPlatform(env: Env | undefined, id: string, opts?: { force?: boolean }): Promise<PlatformResult> {
-  const now = Date.now()
-  const mem = memory.get(id)
-
-  if (!opts?.force && mem && now - mem.fetchedAt < ttlSeconds(env) * 1000) return mem.data
-
-  // 二级缓存:KV(跨实例共享)。新鲜度以数据自身的抓取时间(update_time)为准:
-  // 超过内存 TTL 但在宽限期内的旧数据直接返回,避免冷流量全量重抓打爆子请求限额
-  let kvEntry: CacheEntry | null = null
-  if (!opts?.force) {
-    kvEntry = await readKv(env, id)
-    if (kvEntry) {
-      const dataTime = Date.parse(kvEntry.data.update_time) || 0
-      if (now - dataTime < ttlSeconds(env) * 1000 + KV_GRACE_MS) {
-        memory.set(id, { ...kvEntry, fetchedAt: dataTime || kvEntry.fetchedAt })
-        return kvEntry.data
-      }
-    }
-  }
-
-  const running = inflight.get(id)
-  if (running) return running
-
-  const task = (async (): Promise<PlatformResult> => {
+export async function readPlatforms(env: Env, feeds: Feed[]): Promise<PlatformResult[]> {
+  const shards = [...new Set(feeds.filter((feed) => !feed.paused).map((feed) => feed.shard))]
+  const results = new Map<number, { data: Snapshot | null; error?: string }>(await Promise.all(shards.map(async (shard) => {
     try {
-      const data = await runFetch(id)
-      await persist(env, id, data, kvEntry)
-      return data
+      return [shard, { data: await readPublished(env.KV, shard) }] as const
     } catch (err) {
-      // 降级:优先返回过期缓存(标记 stale),都没有才如实报错
-      const stale = mem ?? (kvEntry ?? (opts?.force ? await readKv(env, id) : null))
-      if (stale) return { ...stale.data, stale: true }
-      const def = PLATFORM_MAP.get(id)!
-      return {
-        platform: id,
-        name: def.name,
-        category: def.category,
-        update_time: new Date().toISOString(),
-        total: 0,
-        items: [],
-        error: err instanceof Error ? err.message : String(err),
-      }
-    } finally {
-      inflight.delete(id)
+      console.error('snapshot-read', shard, String(err))
+      return [shard, { data: reads.get(shard)?.value ?? null, error: '暂时无法读取榜单缓存' }] as const
     }
-  })()
-
-  inflight.set(id, task)
-  return task
+  })))
+  return feeds.map((feed) => {
+    const shard = results.get(feed.shard)
+    return present(feed, shard?.data?.entries[feed.id], shard?.error)
+  })
 }
 
-/** 分批刷新(Workers 定时任务):每批约 1/REFRESH_BATCHES 个平台,
- *  控制单次 scheduled 的子请求数在免费额度内 */
-export async function refreshBatch(env: Env | undefined, batch: number): Promise<void> {
-  const ids = [...PLATFORM_MAP.keys()].filter((_, i) => i % REFRESH_BATCHES === batch % REFRESH_BATCHES)
-  await Promise.all(ids.map((id) => getPlatform(env, id, { force: true })))
+async function collect(feed: Feed, previous?: Entry): Promise<Entry> {
+  const attemptedAt = Date.now()
+  try {
+    const items = (await feed.fetcher()).filter((item) => {
+      return typeof item.title === 'string' && /^https?:\/\//i.test(item.url)
+    }).slice(0, 50).map(({ title, url, hot }) => ({
+      title: title.slice(0, 350),
+      url,
+      hot: typeof hot === 'number' || typeof hot === 'string' ? hot : '',
+    }))
+    if (!items.length) throw new Error('源站没有返回可用榜单')
+    const successAt = Date.now()
+    console.log('feed-success', feed.id, feed.source, items.length)
+    return { items, successAt, attemptedAt, failures: 0 }
+  } catch (err) {
+    const error = (err instanceof Error ? err.message : String(err)).slice(0, 400)
+    console.warn('feed-error', feed.id, error)
+    const failures = (previous?.failures ?? 0) + 1
+    const disabled = /HTTP (401|403|406|412|418|432|451)\b/.test(error)
+    const base = /HTTP 429\b/.test(error) ? 60 : Math.max(10, feed.minutes)
+    return {
+      items: previous?.items ?? [],
+      successAt: previous?.successAt ?? null,
+      attemptedAt,
+      error: disabled ? `${error} · 源站限制，已暂停自动抓取` : error,
+      failures,
+      disabled,
+      retryAt: disabled ? undefined : attemptedAt + Math.min(360, base * 2 ** Math.min(failures - 1, 8)) * 60_000,
+    }
+  }
+}
+
+export async function refreshScheduled(env: Env, cron: string, scheduledTime: number) {
+  const shard = CRONS.indexOf(cron)
+  if (shard === -1) throw new Error(`Unexpected cron: ${cron}`)
+  const tick = Math.floor(scheduledTime / 300_000)
+  const previous = await snapshot(env.KV, shard)
+  if (previous && previous.tick >= tick) return
+
+  const entries = { ...previous?.entries }
+  const due = FEEDS.filter((feed) => {
+    const entry = entries[feed.id]
+    const firstPriorityCheck = !entry && ['github', 'rednote'].includes(feed.id)
+    return feed.shard === shard && !feed.paused && (firstPriorityCheck || isDue(feed, tick))
+      && !entry?.disabled && (entry?.retryAt ?? 0) <= Date.now()
+  })
+  if (!due.length) return
+  await Promise.all(due.map(async (feed) => {
+    entries[feed.id] = await collect(feed, entries[feed.id])
+  }))
+  await env.KV.put(key(shard), JSON.stringify({ tick, entries }))
+  reads.delete(shard)
 }

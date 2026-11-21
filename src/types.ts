@@ -10,22 +10,20 @@ export interface PlatformResult {
   platform: string
   name: string
   category: string
-  /** 数据抓取时间(ISO 8601) */
+  source: string
+  source_link?: string
+  interval_minutes: number | null
   update_time: string
+  attempted_at: string | null
+  expires_at: string | null
+  retry_at: string | null
+  status: 'fresh' | 'stale' | 'error' | 'pending'
   total: number
   items: HotItem[]
-  /** 本次数据来自过期缓存(源站抓取失败时的降级) */
-  stale?: boolean
+  stale: boolean
   error?: string
 }
 
 export interface Env {
-  CORS_ORIGIN?: string
-  CACHE_TTL?: string
-  /** API Key 鉴权:逗号分隔的合法 key 列表;留空则不启用鉴权 */
-  API_KEYS?: string
-  /** 可选 KV 绑定(Workers/Pages 均可在配置或 Dashboard 中开启),用于跨实例共享缓存 */
-  KV?: KVNamespace
-  /** Pages 高级模式自带的环境绑定,用于回退到静态资源 */
-  ASSETS?: { fetch: (request: Request) => Promise<Response> }
+  KV: KVNamespace
 }

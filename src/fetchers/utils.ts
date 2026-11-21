@@ -1,33 +1,38 @@
-export const UA_CHROME =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-
-export const UA_IOS =
-  'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148'
-
-/** 知乎 App 接口识别的 UA(免 Cookie) */
-export const UA_ZHIHU = 'ZhihuHybrid DefaultPack/1.0.0 Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)'
+export const UA_CHROME = 'NowTide/1.0 (+https://github.com/Seleneyuening/hot-topics)'
+export const UA_IOS = UA_CHROME
 
 const DEFAULT_TIMEOUT_MS = 8000
 
-export async function fetchWithTimeout(url: string, init?: RequestInit, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<Response> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  try {
-    return await fetch(url, { ...init, signal: controller.signal, redirect: 'follow' })
-  } finally {
-    clearTimeout(timer)
+export function fetchWithTimeout(url: string, init?: RequestInit, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<Response> {
+  return fetch(url, {
+    ...init,
+    headers: { 'User-Agent': UA_CHROME, ...init?.headers },
+    signal: AbortSignal.timeout(timeoutMs),
+    redirect: 'follow',
+  })
+}
+
+class UpstreamHttpError extends Error {
+  constructor(readonly status: number, url: string) {
+    super(`HTTP ${status} (${hostOf(url)})`)
   }
 }
 
 export async function getJson<T = any>(url: string, init?: RequestInit, timeoutMs?: number): Promise<T> {
   const res = await fetchWithTimeout(url, init, timeoutMs)
-  if (!res.ok) throw new Error(`HTTP ${res.status} (${hostOf(url)})`)
+  if (!res.ok) {
+    await res.body?.cancel()
+    throw new UpstreamHttpError(res.status, url)
+  }
   return (await res.json()) as T
 }
 
 export async function getText(url: string, init?: RequestInit, timeoutMs?: number): Promise<string> {
   const res = await fetchWithTimeout(url, init, timeoutMs)
-  if (!res.ok) throw new Error(`HTTP ${res.status} (${hostOf(url)})`)
+  if (!res.ok) {
+    await res.body?.cancel()
+    throw new UpstreamHttpError(res.status, url)
+  }
   return res.text()
 }
 
@@ -75,6 +80,7 @@ export async function firstOk<T>(attempts: Array<{ name: string; run: () => Prom
     try {
       return await attempt.run()
     } catch (err) {
+      if (err instanceof UpstreamHttpError && [401, 403, 406, 412, 418, 429, 432, 451].includes(err.status)) throw err
       errors.push(`${attempt.name}: ${err instanceof Error ? err.message : String(err)}`)
     }
   }

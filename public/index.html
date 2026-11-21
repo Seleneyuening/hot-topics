@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>今日热点 · 全网热榜聚合</title>
+<title>NowTide · 全网热榜</title>
 <meta name="description" content="自托管的全网热点聚合网关:微博/知乎/百度/抖音/头条/小红书/B站等实时热榜,直连各平台官方接口。">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%94%A5%3C/text%3E%3C/svg%3E">
 <style>
@@ -195,12 +195,15 @@ footer a:hover { color: var(--accent); }
 
 <header>
   <div class="header-inner">
-    <div class="logo"><span class="flame">🔥</span>今日热点<span class="badge-ver" id="ver">API</span></div>
+    <div class="logo"><span class="flame" aria-hidden="true">🔥</span>NowTide</div>
     <div class="header-spacer"></div>
     <div class="search-wrap">
       <span class="icon">⌕</span>
-      <input id="search" type="text" placeholder="关键词筛选…">
+      <input id="search" type="search" aria-label="关键词筛选" placeholder="关键词筛选…">
     </div>
+    <select id="platform" class="btn" aria-label="按平台筛选">
+      <option value="">全部平台</option>
+    </select>
     <button class="btn" id="btn-copy" title="复制全部榜单为 Markdown">复制 Markdown</button>
     <button class="btn" id="btn-auto" title="每 5 分钟自动刷新">自动</button>
     <button class="btn primary" id="btn-refresh"><span class="spin">⟳</span> 刷新</button>
@@ -221,8 +224,9 @@ footer a:hover { color: var(--accent); }
 </main>
 
 <footer>
-  数据来源为各平台公开接口,通过本站自托管网关聚合缓存,仅供学习与选题参考;各条目版权归原作者与所属平台。<br>
-  hot-topics gateway · Cloudflare Workers / Pages 双部署 · <a href="/api" target="_blank">API 文档</a>
+  NowTide · 榜单由本站定时采集，采集时间与来源见各榜单。<br>
+  <a href="/api" target="_blank" rel="noopener">API</a> ·
+  <a href="https://github.com/Seleneyuening/hot-topics" target="_blank" rel="noopener">项目源码</a>
 </footer>
 
 <div id="toast"></div>
@@ -236,9 +240,9 @@ footer a:hover { color: var(--accent); }
     data: [],          // PlatformResult[]
     keyword: '',       // 筛选关键词
     category: '全部',
+    platform: '',
     auto: localStorage.getItem('ht-auto') !== '0',
     timer: null,
-    markdownCache: '',
   }
 
   // ---------- theme ----------
@@ -264,130 +268,142 @@ footer a:hover { color: var(--accent); }
   function renderChips() {
     const cats = ['全部', ...new Set(state.data.map((p) => p.category).filter(Boolean))]
     $('#cat-bar').innerHTML = cats.map((c) =>
-      `<span class="chip${c === state.category ? ' active' : ''}" data-cat="${c}">${c}</span>`).join('')
+      `<button type="button" class="chip${c === state.category ? ' active' : ''}" data-cat="${c}">${c}</button>`).join('')
     document.querySelectorAll('.chip').forEach((el) => {
-      el.onclick = () => { state.category = el.dataset.cat; renderChips(); render() }
+      el.onclick = () => {
+        state.category = el.dataset.cat
+        state.platform = ''
+        $('#platform').value = ''
+        renderChips()
+        render()
+      }
     })
   }
 
   // ---------- helpers ----------
   const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (m) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]))
-  const timeAgo = (iso) => {
-    const diff = (Date.now() - new Date(iso).getTime()) / 1000
-    if (diff < 90) return '刚刚'
-    if (diff < 3600) return `${Math.round(diff / 60)} 分钟前`
-    if (diff < 86400) return `${Math.round(diff / 3600)} 小时前`
-    return `${Math.round(diff / 86400)} 天前`
+  const formatTime = (iso) => new Date(iso).toLocaleString('zh-CN', {
+    timeZone: 'Asia/Shanghai', month: 'numeric', day: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  })
+  const displayStatus = (p) => p.expires_at && Date.parse(p.expires_at) <= Date.now() ? 'stale' : p.status
+  const statusLabels = { fresh: '正常', stale: '已过期', error: '不可用', pending: '等待首次抓取' }
+  const safeUrl = (url) => /^https?:\/\//i.test(url || '') ? escapeHtml(url) : ''
+
+  function visiblePlatform(p) {
+    return (!state.platform || state.platform === p.platform)
+      && (state.category === '全部' || p.category === state.category)
   }
 
-  // ---------- render ----------
   function render() {
     const kw = state.keyword.trim().toLowerCase()
     let totalMatch = 0
-    const cards = state.data.map((p) => {
-      if (state.category !== '全部' && p.category !== state.category) return ''
-      if (p.pending) {
-        return `<div class="card"><div class="card-head"><span class="card-title">${escapeHtml(p.name)}</span>
-          <span class="card-cat">${escapeHtml(p.category || '')}</span></div>
-          <div class="empty-card">加载中…</div></div>`
-      }
-      let rows = p.items
-      if (kw) {
-        rows = rows.filter((it) => it.title.toLowerCase().includes(kw))
-        totalMatch += rows.length
-      }
-      const head = `
+    const cards = state.data.filter(visiblePlatform).map((p) => {
+      const status = displayStatus(p)
+      const rows = p.items.map((item, i) => ({ ...item, rank: i + 1 }))
+        .filter((item) => !kw || item.title.toLowerCase().includes(kw))
+      totalMatch += rows.length
+      const link = safeUrl(p.source_link)
+      const rowsHtml = rows.map((it) => {
+        const href = safeUrl(it.url)
+        return `
+          <div class="row">
+            <span class="rank">${it.rank}</span>
+            ${href ? `<a class="title" href="${href}" target="_blank" rel="noopener noreferrer">${escapeHtml(it.title)}</a>` : `<span class="title">${escapeHtml(it.title)}</span>`}
+            <span class="hot">${escapeHtml(String(it.hot ?? ''))}</span>
+          </div>`
+      }).join('')
+      const list = rows.length
+        ? `<div class="card-list">${rowsHtml}</div>`
+        : `<div class="empty-card">${kw && p.items.length ? '无命中条目' : statusLabels[status]}</div>`
+      return `<section class="card">
         <div class="card-head">
           <span class="card-title">${escapeHtml(p.name)}</span>
-          <span class="card-cat">${escapeHtml(p.category || '')}</span>
-          <span class="card-time">${p.stale ? '<span class="stale-tag">缓存</span>·' : ''}${p.update_time ? timeAgo(p.update_time) : ''}</span>
-        </div>`
-      if (p.error) {
-        return `<div class="card"><div class="card-head"><span class="card-title">${escapeHtml(p.name)}</span>
-          <span class="card-cat">${escapeHtml(p.category || '')}</span></div>
-          <div class="error-card">抓取失败<br><span style="font-size:11.5px;color:var(--text-faint)">${escapeHtml(p.error)}</span><br>
-          <button class="btn primary" data-retry="${escapeHtml(p.platform)}">重试</button></div></div>`
-      }
-      const rowsHtml = rows.slice(0, 15).map((it, i) => `
-        <div class="row">
-          <span class="rank">${i + 1}</span>
-          <a class="title" href="${escapeHtml(it.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(it.title)}</a>
-          <span class="hot">${escapeHtml(String(it.hot ?? ''))}</span>
-        </div>`).join('')
-      const listHtml = rows.length
-        ? `<div class="card-list">${rowsHtml}</div>`
-        : `<div class="empty-card">${kw ? '无命中条目' : '暂无数据'}</div>`
-      return `<div class="card">${head}${listHtml}
-        <div class="card-foot">共 ${p.total ?? rows.length} 条 · 来源:各平台官方接口</div></div>`
+          <span class="card-cat">${escapeHtml(p.category)}</span>
+          <span class="card-time ${status === 'error' || status === 'stale' ? 'stale-tag' : ''}">${statusLabels[status]}</span>
+        </div>
+        ${p.error ? `<div class="error-card">${escapeHtml(p.error)}</div>` : ''}
+        ${list}
+        <div class="card-foot">
+          ${escapeHtml(p.source)}${link ? ` · <a href="${link}" target="_blank" rel="noopener noreferrer">打开原平台</a>` : ''}
+          <br>最后成功 ${p.update_time ? formatTime(p.update_time) : '—'}
+          ${p.error && p.attempted_at ? ` · 最近尝试 ${formatTime(p.attempted_at)}` : ''}
+          ${p.error && p.retry_at ? ` · 最早重试 ${formatTime(p.retry_at)}` : ''}
+        </div>
+      </section>`
     }).join('')
-    grid.innerHTML = cards || '<div class="empty-card" style="grid-column:1/-1;padding:60px 0">该分类暂无数据</div>'
+    if (state.data.length) grid.innerHTML = cards || '<div class="empty-card" style="grid-column:1/-1;padding:60px 0">该筛选无榜单</div>'
     $('#match-info').textContent = kw ? `关键词命中 ${totalMatch} 条` : ''
-    document.querySelectorAll('[data-retry]').forEach((btn) => {
-      btn.onclick = () => refresh('single', btn.dataset.retry)
-    })
   }
 
-  // ---------- data ----------
-  // 按分类分批加载:绕开免费版 Workers 单请求 50 子请求上限,分类间互不影响
-  let platMeta = null
-  let reloadedForSession = false
+  function summary() {
+    const count = { fresh: 0, stale: 0, error: 0, pending: 0 }
+    for (const feed of state.data) count[displayStatus(feed)]++
+    $('#status-dot').classList.toggle('err', Boolean(count.error || count.stale))
+    $('#status-text').textContent = [
+      `${count.fresh} 个正常`,
+      count.stale && `${count.stale} 个过期`,
+      count.error && `${count.error} 个不可用`,
+      count.pending && `${count.pending} 个等待采集`,
+    ].filter(Boolean).join(' · ')
+  }
 
-  async function refresh(mode = 'all', retryId = null) {
+  let loading = false
+  async function refresh() {
+    if (loading) return
+    loading = true
     const btn = $('#btn-refresh')
     btn.classList.add('refreshing')
-    $('#status-text').textContent = '刷新中…'
+    btn.disabled = true
     try {
-      if (!platMeta) {
-        const meta = await (await fetch('/api/platforms')).json()
-        platMeta = meta.data || []
-      }
-      // 初始化占位(registry 顺序),已加载过的分类数据保留
-      if (mode === 'all') {
-        state.data = platMeta.map((p) => {
-          const old = state.data.find((x) => x.platform === p.id)
-          return old || { platform: p.id, name: p.name, category: p.category, update_time: '', total: 0, items: [], pending: true }
-        })
+      const res = await fetch('/api/all', { cache: 'no-cache' })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const body = await res.json()
+      if (!Array.isArray(body.data)) throw new Error('榜单响应格式无效')
+      const first = !state.data.length
+      state.data = body.data
+      if (first) {
+        const filter = $('#platform')
+        for (const feed of state.data) filter.add(new Option(feed.name, feed.platform))
         renderChips()
-        render()
       }
-      const cats = mode === 'all'
-        ? [...new Set(platMeta.map((p) => p.category))]
-        : null
-      let okCount = 0, done = 0
-      const totalParts = mode === 'all' ? cats.length : 1
-      const applyPart = (body) => {
-        for (const p of body.data || []) {
-          const idx = state.data.findIndex((x) => x.platform === p.platform)
-          if (idx >= 0) state.data[idx] = p
-        }
-        done++
-        const loaded = state.data.filter((p) => !p.pending)
-        okCount = loaded.filter((p) => !p.error).length
-        $('#status-text').textContent = `加载中 ${done}/${totalParts}…`
-        render()
-      }
-      const parts = mode === 'all'
-        ? cats.map((cat) => fetch(`/api/category/${encodeURIComponent(cat)}`).then((r) => r.json()))
-        : [fetch(`/api/${retryId}?refresh=1`).then((r) => r.json())]
-      const settled = await Promise.allSettled(parts)
-      settled.forEach((r) => { if (r.status === 'fulfilled') applyPart(r.value) })
-      const failed = state.data.filter((p) => !p.pending && p.error).length
-      $('#status-dot').classList.toggle('err', failed > 0)
-      $('#status-text').textContent = failed
-        ? `${okCount} 个平台正常,${failed} 个平台暂不可用`
-        : `全部 ${okCount} 个平台正常`
-      $('#update-time').textContent = `更新于 ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`
+      $('#update-time').textContent = `网页读取 ${formatTime(body.timestamp)}（北京时间）`
+      summary()
       render()
-    } catch (e) {
-      $('#status-text').textContent = `加载失败:${e.message}`
-      if (!state.data.length) grid.innerHTML = '<div class="empty-card" style="grid-column:1/-1;padding:80px 0">网关不可达,请检查部署状态</div>'
+    } catch {
+      if (state.data.length) {
+        state.data = state.data.map((p) => ({
+          ...p,
+          status: p.items.length ? 'stale' : 'error',
+          error: p.error ?? '网站暂时无法读取榜单',
+        }))
+        render()
+      } else {
+        grid.innerHTML = '<div class="empty-card" style="grid-column:1/-1;padding:80px 0">暂时无法读取榜单</div>'
+      }
+      $('#status-dot').classList.add('err')
+      $('#status-text').textContent = '网页读取失败'
     } finally {
+      loading = false
+      btn.disabled = false
       btn.classList.remove('refreshing')
     }
   }
 
   // ---------- controls ----------
+  $('#platform').onchange = (event) => {
+    state.platform = event.target.value
+    state.category = '全部'
+    renderChips()
+    render()
+  }
+  setInterval(() => {
+    if (!state.data.some((p) => p.status === 'fresh' && displayStatus(p) === 'stale')) return
+    state.data = state.data.map((p) => ({ ...p, status: displayStatus(p) }))
+    summary()
+    render()
+  }, 15_000)
   $('#btn-refresh').onclick = () => refresh()
   $('#search').addEventListener('input', (e) => { state.keyword = e.target.value; render() })
   $('#btn-auto').classList.toggle('active', state.auto)
@@ -406,8 +422,7 @@ footer a:hover { color: var(--accent); }
     const kw = state.keyword.trim().toLowerCase()
     const lines = [`# 今日热点(${new Date().toLocaleString('zh-CN', { hour12: false })})`]
     for (const p of state.data) {
-      if (p.error || !p.items?.length) continue
-      if (state.category !== '全部' && p.category !== state.category) continue
+      if (displayStatus(p) !== 'fresh' || !p.items.length || !visiblePlatform(p)) continue
       const items = kw ? p.items.filter((it) => it.title.toLowerCase().includes(kw)) : p.items
       if (!items.length) continue
       lines.push('', `## ${p.name}`)

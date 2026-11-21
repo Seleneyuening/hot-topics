@@ -2,25 +2,24 @@
   "name": "hot-topics",
   "version": "3.0.0",
   "type": "module",
-  "description": "全网热点聚合网关(原生官方直连 · 免第三方 · 支持 Workers/Pages 双部署)",
+  "description": "NowTide · 自托管热榜",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "dev": "wrangler dev",
-    "dev:pages": "wrangler pages dev dist/pages",
+    "dev": "npm run build && wrangler dev --test-scheduled",
     "deploy": "npm run build && wrangler deploy",
-    "deploy:pages": "npm run build && node scripts/deploy-pages.mjs",
     "kv:create": "wrangler kv namespace create KV",
     "typecheck": "tsc --noEmit",
-    "test:fetchers": "node scripts/test-fetchers.mjs"
+    "test:fetchers": "node scripts/test-fetchers.mjs",
+    "test": "node --test scripts/verify-nowtide.mjs"
   },
   "dependencies": {
     "hono": "^4.13.7",
     "js-md5": "^0.9.2"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20250214.0",
+    "@cloudflare/workers-types": "^5.20261121.1",
     "esbuild": "^0.25.0",
     "typescript": "^5.7.3",
-    "wrangler": "^3.109.2"
+    "wrangler": "^4.166.0"
   }
 }

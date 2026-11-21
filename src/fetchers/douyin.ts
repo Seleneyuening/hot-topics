@@ -1,5 +1,5 @@
 import type { HotItem } from '../types'
-import { UA_CHROME, fetchWithTimeout, firstOk, getJson } from './utils'
+import { UA_CHROME, firstOk, getJson } from './utils'
 
 function mapWordList(wordList: any[]): HotItem[] {
   return wordList
@@ -22,23 +22,14 @@ async function viaSnssdk(host: string): Promise<HotItem[]> {
   return items
 }
 
-/** Web 接口(兜底):先访问登录页换 Cookie,再请求热搜 */
+/** Web 接口（匿名） */
 async function viaWeb(): Promise<HotItem[]> {
-  let cookie = ''
-  try {
-    const res = await fetchWithTimeout('https://login.douyin.com/')
-    const setCookies: string[] = (res.headers as any).getSetCookie?.() || []
-    cookie = setCookies.map((c) => c.split(';')[0]).join('; ')
-  } catch {
-    // 拿不到 Cookie 时仍尝试无 Cookie 请求
-  }
   const json = await getJson(
     'https://www.douyin.com/aweme/v1/web/hot/search/list/?device_platform=webapp&aid=6383&channel=channel_pc_web&detail_list=1',
     {
       headers: {
         'User-Agent': UA_CHROME,
         Referer: 'https://www.douyin.com/',
-        ...(cookie ? { Cookie: cookie } : {}),
       },
     },
   )

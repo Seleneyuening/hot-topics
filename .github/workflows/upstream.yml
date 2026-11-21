@@ -1,0 +1,100 @@
+name: Check upstream
+on:
+  schedule:
+    - cron: '47 1 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nowtide-upstream
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_URL: https://github.com/wimdaw/hot-topics.git
+
+jobs:
+  discover:
+    if: github.repository == 'Seleneyuening/hot-topics'
+    runs-on: ubuntu-latest
+    outputs:
+      revision: ${{ steps.upstream.outputs.revision }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - id: upstream
+        run: |
+          git fetch --no-tags "$UPSTREAM_URL" refs/heads/main
+          revision=$(git rev-parse FETCH_HEAD)
+          if git merge-base --is-ancestor "$revision" HEAD; then
+            echo "Upstream is already in main." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "revision=$revision" >> "$GITHUB_OUTPUT"
+          fi
+
+  verify-merge:
+    needs: discover
+    if: needs.discover.outputs.revision != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Test merge against main
+        env:
+          REVISION: ${{ needs.discover.outputs.revision }}
+        run: |
+          git fetch --no-tags "$UPSTREAM_URL" "$REVISION"
+          git -c user.name=NowTide -c user.email=nowtide@users.noreply.github.com merge --no-commit --no-ff "$REVISION"
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+
+  open-pr:
+    needs: [discover, verify-merge]
+    if: always() && needs.discover.result == 'success' && needs.discover.outputs.revision != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Open or update the upstream pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REVISION: ${{ needs.discover.outputs.revision }}
+          CHECK_RESULT: ${{ needs.verify-merge.result }}
+        run: |
+          git fetch --no-tags "$UPSTREAM_URL" "$REVISION"
+          if git merge-base --is-ancestor "$REVISION" HEAD; then
+            exit 0
+          fi
+          branch="upstream-sync/${REVISION:0:12}"
+          body=$(mktemp)
+          cat > "$body" <<BODY
+          Upstream revision: https://github.com/wimdaw/hot-topics/commit/$REVISION
+          Merge and verification: **$CHECK_RESULT**
+          Details: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+
+          Merge with a merge commit to preserve upstream history.
+          BODY
+          pr=$(gh pr list -R "$GITHUB_REPOSITORY" --head "$branch" --base main --json number --jq '.[0].number // empty')
+          if [[ -n "$pr" ]]; then
+            gh pr edit "$pr" -R "$GITHUB_REPOSITORY" --body-file "$body"
+          else
+            git push origin "$REVISION:refs/heads/$branch"
+            gh pr create -R "$GITHUB_REPOSITORY" --base main --head "$branch" --title "Sync upstream ${REVISION:0:12}" --body-file "$body" --draft
+          fi

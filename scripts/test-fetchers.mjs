@@ -14,7 +14,7 @@ const rounds = args.includes('--rounds') ? Number(args[args.indexOf('--rounds') 
 mkdirSync('.test-tmp', { recursive: true })
 
 await build({
-  entryPoints: ['src/registry.ts'],
+  entryPoints: ['src/schedule.ts'],
   bundle: true,
   format: 'esm',
   platform: 'neutral',
@@ -23,11 +23,13 @@ await build({
   logLevel: 'silent',
 })
 
-const { PLATFORMS } = await import('../.test-tmp/registry.test.mjs')
+const { FEEDS } = await import('../.test-tmp/registry.test.mjs')
 
 const selected = platformArg
-  ? PLATFORMS.filter((p) => platformArg.split(',').map((s) => s.trim()).includes(p.id))
-  : PLATFORMS
+  ? FEEDS.filter((p) => platformArg.split(',').map((s) => s.trim()).includes(p.id))
+  : FEEDS.filter((feed) => !feed.paused)
+
+if (!selected.length) throw new Error('没有匹配的榜单')
 
 let ok = 0
 const failed = []

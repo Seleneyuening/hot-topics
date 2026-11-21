@@ -1,10 +1,10 @@
 import type { HotItem } from '../types'
-import { UA_CHROME, UA_ZHIHU, firstOk, getJson } from './utils'
+import { UA_CHROME, firstOk, getJson } from './utils'
 
 /** App 接口(免 Cookie) */
 async function viaAppApi(): Promise<HotItem[]> {
   const json = await getJson('https://api.zhihu.com/topstory/hot-lists/total?limit=50', {
-    headers: { 'User-Agent': UA_ZHIHU, Referer: 'https://www.zhihu.com/' },
+    headers: { 'User-Agent': UA_CHROME, Referer: 'https://www.zhihu.com/' },
   })
   const list: any[] = json?.data || []
   const items = list
@@ -44,7 +44,7 @@ async function viaWebV3(): Promise<HotItem[]> {
 
 export async function fetchZhihu(): Promise<HotItem[]> {
   return firstOk([
-    { name: 'app-api', run: viaAppApi },
     { name: 'web-v3', run: viaWebV3 },
+    { name: 'app-api', run: viaAppApi },
   ])
 }

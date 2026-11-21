@@ -1,19 +1,19 @@
-name = "hot-topics"
+name = "nowtide"
 main = "dist/worker.js"
-compatibility_date = "2025-07-01"
+compatibility_date = "2026-11-21"
+workers_dev = true
+preview_urls = false
 
-# 定时预热:每 5 分钟刷一批(3 批轮转一圈),控制单次子请求数在免费额度内
+[assets]
+directory = "./public"
+
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["*/5 * * * *", "1-59/5 * * * *", "2-59/5 * * * *"]
 
-[vars]
-CORS_ORIGIN = "*"
-CACHE_TTL = "300"
-# API Key 鉴权(逗号分隔可配多个,留空则不启用)。更换后重新部署生效
-API_KEYS = "htk_6a3e203eef964d27008b8b41a96e6843e88ac1f4c7e7f52c"
+[[kv_namespaces]]
+binding = "KV"
+id = "59da911d7b16460fb71615927ec0ff3a"
 
-# 可选:开启 KV 后缓存跨实例共享,源站故障时还能降级返回旧数据(强烈推荐)
-# KV namespace 已创建: hot-topics-kv (id 见 wrangler.pages.toml),取消注释即可启用
-# [[kv_namespaces]]
-# binding = "KV"
-# id = "ce0561b8b2914891a546ac11b4382bb7"
+[observability]
+enabled = true
+head_sampling_rate = 1
