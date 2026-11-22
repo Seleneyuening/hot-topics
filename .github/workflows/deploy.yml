@@ -28,11 +28,11 @@ jobs:
       - run: npm test
       - name: Deploy Worker and static assets
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN || secrets.CLOUDFLARE }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           if [[ -z "$CLOUDFLARE_API_TOKEN" || -z "$CLOUDFLARE_ACCOUNT_ID" ]]; then
-            echo "::error::Set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in Actions Secrets."
+            echo "::error::Set CLOUDFLARE_API_TOKEN (or CLOUDFLARE) and CLOUDFLARE_ACCOUNT_ID in Actions Secrets."
             exit 1
           fi
           npx wrangler deploy
