@@ -19,6 +19,9 @@ test('Worker cron fetches a snapshot; HTTP requests only read it', async () => {
   globalThis.fetch = async (input) => {
     fetches++
     const url = new URL(input)
+    if (url.pathname === '/api/v1/articles' && url.hostname === 'new.xianbao.fun') {
+      return Response.json({ code: 0, data: { items: [{ title: 'API &amp; fixture', url: 'https://new.xianbao.fun/xiaodigu/1.html' }] } })
+    }
     if (url.hostname === 's.search.bilibili.com') {
       biliFetches++
       if (fail) return new Response(null, { status: 412 })
@@ -58,6 +61,17 @@ test('Worker cron fetches a snapshot; HTTP requests only read it', async () => {
     assert.deepEqual(stale.items, refreshed.items)
     await tick(tickTime + 600_000)
     assert.equal(biliFetches, 2)
+
+    records.set('nowtide:v1:0', {
+      tick: Math.floor(tickTime / 300_000) - 1,
+      entries: { xianbao: { items: [], successAt: null, attemptedAt: Date.now(), error: '旧抓取器故障', failures: 6, retryAt: Date.now() + 3600_000 } },
+    })
+    await new Promise((resolve) => {
+      worker.scheduled({ cron: '*/5 * * * *', scheduledTime: tickTime - 60_000 }, env, { waitUntil: resolve })
+    })
+    const recovered = await get('/api/xianbao')
+    assert.equal(recovered.status, 'fresh')
+    assert.equal(recovered.items[0].title, 'API & fixture')
   } finally {
     globalThis.fetch = originalFetch
   }

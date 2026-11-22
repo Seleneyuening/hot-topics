@@ -287,8 +287,12 @@ footer a:hover { color: var(--accent); }
     timeZone: 'Asia/Shanghai', month: 'numeric', day: 'numeric',
     hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
   })
-  const displayStatus = (p) => p.expires_at && Date.parse(p.expires_at) <= Date.now() ? 'stale' : p.status
-  const statusLabels = { fresh: '正常', stale: '已过期', error: '不可用', pending: '等待首次抓取' }
+  function displayStatus(p) {
+    if (p.expires_at && Date.parse(p.expires_at) <= Date.now()) return 'stale'
+    if (p.status === 'error' && p.interval_minutes === null) return 'paused'
+    return p.status
+  }
+  const statusLabels = { fresh: '正常', stale: '已过期', error: '抓取失败', paused: '已暂停', pending: '等待首次抓取' }
   const safeUrl = (url) => /^https?:\/\//i.test(url || '') ? escapeHtml(url) : ''
 
   function visiblePlatform(p) {
@@ -321,7 +325,7 @@ footer a:hover { color: var(--accent); }
         <div class="card-head">
           <span class="card-title">${escapeHtml(p.name)}</span>
           <span class="card-cat">${escapeHtml(p.category)}</span>
-          <span class="card-time ${status === 'error' || status === 'stale' ? 'stale-tag' : ''}">${statusLabels[status]}</span>
+          <span class="card-time ${['error', 'stale', 'paused'].includes(status) ? 'stale-tag' : ''}">${statusLabels[status]}</span>
         </div>
         ${p.error ? `<div class="error-card">${escapeHtml(p.error)}</div>` : ''}
         ${list}
@@ -338,13 +342,14 @@ footer a:hover { color: var(--accent); }
   }
 
   function summary() {
-    const count = { fresh: 0, stale: 0, error: 0, pending: 0 }
+    const count = { fresh: 0, stale: 0, error: 0, paused: 0, pending: 0 }
     for (const feed of state.data) count[displayStatus(feed)]++
     $('#status-dot').classList.toggle('err', Boolean(count.error || count.stale))
     $('#status-text').textContent = [
       `${count.fresh} 个正常`,
       count.stale && `${count.stale} 个过期`,
-      count.error && `${count.error} 个不可用`,
+      count.error && `${count.error} 个抓取失败`,
+      count.paused && `${count.paused} 个已暂停`,
       count.pending && `${count.pending} 个等待采集`,
     ].filter(Boolean).join(' · ')
   }
@@ -400,7 +405,7 @@ footer a:hover { color: var(--accent); }
   }
   setInterval(() => {
     if (!state.data.some((p) => p.status === 'fresh' && displayStatus(p) === 'stale')) return
-    state.data = state.data.map((p) => ({ ...p, status: displayStatus(p) }))
+    state.data = state.data.map((p) => p.status === 'fresh' && displayStatus(p) === 'stale' ? { ...p, status: 'stale' } : p)
     summary()
     render()
   }, 15_000)

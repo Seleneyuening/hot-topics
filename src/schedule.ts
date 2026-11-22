@@ -25,6 +25,7 @@ const paused: Record<string, string> = {
 
 const links: Record<string, string> = {
   rednote: 'https://www.xiaohongshu.com/explore',
+  kuaishou: 'https://www.kuaishou.com/',
   weibo: 'https://s.weibo.com/top/summary?cate=realtimehot',
   zhihu: 'https://www.zhihu.com/hot',
   'bilibili-video': 'https://www.bilibili.com/v/popular/all',
@@ -39,6 +40,7 @@ const sources: Record<string, string> = {
   cls: '财联社簽名接口；上游候补为新浪财经（不同榜单）',
   x: '第三方聚合 · trends24.today',
   weixin: '第三方聚合 · tophub.today',
+  xianbao: '线报酷公开 API · new.xianbao.fun',
 }
 
 let standardIndex = 0
@@ -49,7 +51,10 @@ export const FEEDS = PLATFORMS.map((platform) => {
     ...platform,
     source: sources[platform.id] ?? platform.source,
     link: links[platform.id],
-    paused: paused[platform.id],
+    paused: platform.id === 'kuaishou'
+      ? '快手站点的 robots.txt 限制通用爬虫。可打开快手查看热榜。'
+      : paused[platform.id],
+    revision: platform.id === 'xianbao' ? 1 : undefined,
     shard: fast?.shard ?? index % CRONS.length,
     minutes: fast?.minutes ?? 60,
     slot: platform.id === 'github' ? 2 : platform.id === 'rednote' ? 0 : Math.floor(index / CRONS.length) % 12,

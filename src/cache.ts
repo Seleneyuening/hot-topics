@@ -9,6 +9,7 @@ interface Entry {
   failures: number
   retryAt?: number
   disabled?: boolean
+  revision?: number
 }
 
 interface Snapshot {
@@ -87,11 +88,11 @@ async function collect(feed: Feed, previous?: Entry): Promise<Entry> {
     if (!items.length) throw new Error('源站没有返回可用榜单')
     const successAt = Date.now()
     console.log('feed-success', feed.id, feed.source, items.length)
-    return { items, successAt, attemptedAt, failures: 0 }
+    return { items, successAt, attemptedAt, failures: 0, revision: feed.revision }
   } catch (err) {
     const error = (err instanceof Error ? err.message : String(err)).slice(0, 400)
     console.warn('feed-error', feed.id, error)
-    const failures = (previous?.failures ?? 0) + 1
+    const failures = (previous?.revision === feed.revision ? previous?.failures ?? 0 : 0) + 1
     const disabled = /HTTP (401|403|406|412|418|432|451)\b/.test(error)
     const base = /HTTP 429\b/.test(error) ? 60 : Math.max(10, feed.minutes)
     return {
@@ -101,6 +102,7 @@ async function collect(feed: Feed, previous?: Entry): Promise<Entry> {
       error: disabled ? `${error} · 源站限制，已暂停自动抓取` : error,
       failures,
       disabled,
+      revision: feed.revision,
       retryAt: disabled ? undefined : attemptedAt + Math.min(360, base * 2 ** Math.min(failures - 1, 8)) * 60_000,
     }
   }
@@ -116,9 +118,10 @@ export async function refreshScheduled(env: Env, cron: string, scheduledTime: nu
   const entries = { ...previous?.entries }
   const due = FEEDS.filter((feed) => {
     const entry = entries[feed.id]
+    if (feed.shard !== shard || feed.paused) return false
+    if (feed.revision !== undefined && feed.revision !== entry?.revision) return true
     const firstPriorityCheck = !entry && ['github', 'rednote'].includes(feed.id)
-    return feed.shard === shard && !feed.paused && (firstPriorityCheck || isDue(feed, tick))
-      && !entry?.disabled && (entry?.retryAt ?? 0) <= Date.now()
+    return (firstPriorityCheck || isDue(feed, tick)) && !entry?.disabled && (entry?.retryAt ?? 0) <= Date.now()
   })
   if (!due.length) return
   await Promise.all(due.map(async (feed) => {
